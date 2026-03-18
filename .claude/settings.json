@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go:*)",
+      "Bash(gofmt:*)",
+      "Bash(goimports:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; [[ \"$f\" == *.go ]] && command -v gofmt >/dev/null 2>&1 && gofmt -w \"$f\"; } 2>/dev/null || true",
+            "statusMessage": "Formatting Go file..."
+          }
+        ]
+      }
+    ]
+  }
+}
