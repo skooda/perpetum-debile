@@ -1,3 +1,4 @@
+// main.go
 package main
 
 import (
@@ -6,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"image/png"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,25 +17,53 @@ import (
 )
 
 func main() {
-	// Parse CLI flags
-	cmdFlag := flag.String("cmd", "", "Shell command to execute repeatedly")
-	delayFlag := flag.Duration("delay", 5*time.Second, "Pause between end of one run and start of next")
-	timeoutFlag := flag.Duration("timeout", 10*time.Minute, "Max duration for a single command run")
+	cmdFlag := flag.String("cmd", "", "shell command to run (required)")
+	delayFlag := flag.Duration("delay", 5*time.Second, "pause between end of run and next start")
+	timeoutFlag := flag.Duration("timeout", 10*time.Minute, "max duration per command run")
 	flag.Parse()
 
-	// Validate required --cmd flag
 	if *cmdFlag == "" {
-		fmt.Fprintf(os.Stderr, "Error: --cmd flag is required\n")
+		fmt.Fprintln(os.Stderr, "error: --cmd is required")
+		flag.Usage()
 		os.Exit(1)
 	}
-
-	// Warn if timeout <= delay
 	if *timeoutFlag <= *delayFlag {
-		fmt.Fprintf(os.Stderr, "Warning: --timeout (%v) is less than or equal to --delay (%v)\n", *timeoutFlag, *delayFlag)
+		fmt.Fprintln(os.Stderr, "warning: --timeout should be greater than --delay")
 	}
 
-	// Validate all embedded PNG icons by attempting to decode
-	iconBytes := map[string][]byte{
+	validateIcons()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	systray.Run(func() {
+		systray.SetTemplateIcon(checkPNG, checkPNG)
+		mQuit := systray.AddMenuItem("Quit", "Quit Perpetum Debile")
+
+		runner := &Runner{cmd: *cmdFlag, delay: *delayFlag, timeout: *timeoutFlag}
+		states := make(chan State)
+
+		go runner.Run(ctx, states)
+		go NewAnimator(states).Run(ctx)
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+
+		go func() {
+			select {
+			case <-mQuit.ClickedCh:
+			case <-sigCh:
+			}
+			cancel()
+			systray.Quit()
+		}()
+	}, func() {
+		cancel()
+	})
+}
+
+// validateIcons decodes all embedded PNGs at startup, fataling on any invalid icon.
+func validateIcons() {
+	icons := map[string][]byte{
 		"flame1": flame1PNG,
 		"flame2": flame2PNG,
 		"flame3": flame3PNG,
@@ -41,59 +71,9 @@ func main() {
 		"check":  checkPNG,
 		"bang":   bangPNG,
 	}
-
-	for name, data := range iconBytes {
-		if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to decode embedded PNG asset '%s': %v\n", name, err)
-			os.Exit(1)
+	for name, data := range icons {
+		if _, err := png.Decode(bytes.NewReader(data)); err != nil {
+			log.Fatalf("invalid icon %q: %v", name, err)
 		}
 	}
-
-	// Create state channel for communication between Runner and Animator
-	stateChan := make(chan State)
-
-	// Set up signal handler for SIGTERM and SIGINT
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
-
-	// Create a context that can be cancelled by the signal handler
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Launch Runner goroutine
-	go runnerLoop(ctx, *cmdFlag, *delayFlag, *timeoutFlag, stateChan)
-
-	// Initialize systray and start Animator goroutine
-	systray.Run(
-		func() {
-			// On ready: start animator and set up menu
-			go animatorLoop(ctx, stateChan)
-			quitMenu := systray.AddMenuItem("Quit", "Quit the application")
-
-			// Handle Quit menu item clicks
-			go func() {
-				<-quitMenu.ClickedCh
-				cancel()
-			}()
-		},
-		func() {
-			// On exit: clean up
-			cancel()
-		},
-	)
-
-	// Handle signals
-	go func() {
-		sig := <-sigChan
-		_ = sig // signal received
-
-		// Cancel the context to kill any running child process
-		cancel()
-
-		// Wait for runner to exit (it will close the state channel)
-		// Give it a short grace period
-		time.Sleep(500 * time.Millisecond)
-
-		// Call systray.Quit() to exit the application
-		systray.Quit()
-	}()
 }
