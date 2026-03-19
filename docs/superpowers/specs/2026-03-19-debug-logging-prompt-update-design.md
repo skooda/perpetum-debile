@@ -33,26 +33,32 @@ perpetum-debile <path> [--delay 5s] [--timeout 10m] [--debug]
 
 ### Log file
 
-- Location: `<path>/debug.log` (same directory as `target.md` and `standup.log`)
+- Location: `<path>/debug.log` (same directory as `target.md`)
 - Mode: append — survives app restarts, accumulates across all runs
 - Each run is preceded by a `--- <RFC3339 timestamp> ---\n` header line
 - A blank line is written after each run's output as a separator
 - Created automatically if it does not exist
 
+### Implementation order dependency
+
+This spec is applied **after** the token counting plan (`2026-03-19-token-counting.md`). The token counting plan introduces `--output-format json`, the `stdoutBuf bytes.Buffer` for stdout capture, and switches `runOnce` from `c.Run()` to `c.Output()`. This spec then replaces that `c.Output()` call with an explicit `c.Run()` + manual stdout tee to support debug logging.
+
 ### Architecture
 
-**`main.go`:** Add `--debug` boolean flag. If `--debug` is set, open `<path>/debug.log` in append+create mode (`os.O_APPEND|os.O_CREATE|os.O_WRONLY`, perm `0644`) after directory validation. Pass the `*os.File` to `Runner`. Close the file in the `systray` `onExit` callback.
+**`main.go`:** Add `--debug` boolean flag. If `--debug` is set, open `<path>/debug.log` in append+create mode (`os.O_APPEND|os.O_CREATE|os.O_WRONLY`, perm `0644`) after directory validation. Pass the `*os.File` to `Runner`. Close the file with `defer f.Close()` immediately after opening — this runs when `main()` returns (after `systray.Run` exits), ensuring the handle is always closed on process exit.
 
-**`runner.go`:** Add `debugLog *os.File` field to `Runner` struct (`nil` = debug off). In `runOnce`, when `debugLog != nil`:
-- Write `--- <timestamp> ---\n` header to `debugLog`
-- Capture stdout into a `bytes.Buffer` for token parsing
+**`runner.go`:** Add `debugLog *os.File` field to `Runner` struct (`nil` = debug off). In `runOnce`, replace `c.Output()` with `c.Run()` and explicit stdout management:
+
+When `debugLog != nil`:
+- Write `--- <RFC3339 timestamp> ---\n` header to `debugLog`
 - Set `c.Stdout = io.MultiWriter(&stdoutBuf, debugLog)` to tee stdout to both the buffer and the log
 - Set `c.Stderr = debugLog` to capture stderr to the log
 - After `c.Run()`, write `\n` separator to `debugLog`
 
-When `debugLog == nil` (debug off), `c.Stdout` is set to `&stdoutBuf` only and `c.Stderr` is left nil (discarded).
+When `debugLog == nil`:
+- Set `c.Stdout = &stdoutBuf` only; `c.Stderr` left nil (discarded)
 
-Note: `runOnce` switches from `c.Output()` to `c.Run()` with manually managed `c.Stdout` to support the conditional tee. Token parsing still reads from the same `stdoutBuf.Bytes()`.
+Token parsing reads from `stdoutBuf.Bytes()` in both cases — identical to what `c.Output()` returned before.
 
 ### Token counting interaction
 
@@ -68,7 +74,7 @@ The `--output-format json` stdout is captured into `stdoutBuf` in all cases. Tok
 
 ## Unchanged
 
-`animator.go`, `state.go`, `assets.go`, `runner_test.go`. The debug log is not tested (it's I/O to an external file); the existing runner tests are unaffected since they pass `nil` for `debugLog`.
+`animator.go`, `state.go`, `assets.go`, `runner_test.go`. The debug log is not tested (it's I/O to an external file). Existing runner tests use `&Runner{path: ..., delay: ..., timeout: ...}` — the new `debugLog` field zero-initialises to `nil`, so all tests continue to compile and pass without modification.
 
 ## Out of Scope
 
