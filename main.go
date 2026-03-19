@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,12 +20,13 @@ import (
 func main() {
 	delayFlag := flag.Duration("delay", 5*time.Second, "pause between end of run and next start")
 	timeoutFlag := flag.Duration("timeout", 10*time.Minute, "max duration per Claude Code run")
+	debugFlag := flag.Bool("debug", false, "append claude output to <path>/debug.log")
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "error: path argument is required")
-		fmt.Fprintln(os.Stderr, "usage: perpetum-debile <path> [--delay 5s] [--timeout 10m]")
+		fmt.Fprintln(os.Stderr, "usage: perpetum-debile <path> [--delay 5s] [--timeout 10m] [--debug]")
 		os.Exit(1)
 	}
 	targetPath := args[0]
@@ -38,6 +40,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "warning: --timeout should be greater than --delay")
 	}
 
+	var debugLog *os.File
+	if *debugFlag {
+		debugLog, err = os.OpenFile(filepath.Join(targetPath, "debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot open debug.log: %v\n", err)
+			os.Exit(1)
+		}
+		defer debugLog.Close()
+	}
+
 	validateIcons()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -46,7 +58,7 @@ func main() {
 		systray.SetIcon(checkPNG)
 		mQuit := systray.AddMenuItem("Quit", "Quit Perpetum Debile")
 
-		runner := &Runner{path: targetPath, delay: *delayFlag, timeout: *timeoutFlag}
+		runner := &Runner{path: targetPath, delay: *delayFlag, timeout: *timeoutFlag, debugLog: debugLog}
 		states := make(chan State)
 
 		go runner.Run(ctx, states)

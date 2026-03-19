@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -174,5 +175,48 @@ func TestRunnerMissingTargetMD(t *testing.T) {
 	// No tokens consumed when target.md is missing
 	if got[1].RunTokens != 0 {
 		t.Errorf("state[1].RunTokens: want 0, got %d", got[1].RunTokens)
+	}
+}
+
+func TestRunnerDebugLog(t *testing.T) {
+	script := `printf '{"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":900}}\n'; exit 0`
+	projectDir, cleanup := setupTestEnv(t, script, true)
+	defer cleanup()
+
+	debugFile := filepath.Join(t.TempDir(), "debug.log")
+	f, err := os.Create(debugFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	r := &Runner{path: projectDir, delay: 0, timeout: 5 * time.Second, debugLog: f}
+	states := make(chan State)
+	go r.Run(ctx, states)
+
+	got := make([]State, 0)
+	for s := range states {
+		got = append(got, s)
+		if len(got) >= 2 {
+			cancel()
+		}
+	}
+	f.Close()
+
+	data, err := os.ReadFile(debugFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "--- ") {
+		t.Errorf("debug.log missing timestamp header, got: %q", content)
+	}
+	if !strings.Contains(content, "usage") {
+		t.Errorf("debug.log missing claude output, got: %q", content)
+	}
+	if got[1].RunTokens != 1000 {
+		t.Errorf("RunTokens: want 1000, got %d", got[1].RunTokens)
 	}
 }

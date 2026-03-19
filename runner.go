@@ -2,9 +2,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,9 +18,10 @@ const maxConsecutiveTimeouts = 3
 
 // Runner runs claude in a target directory sequentially in a loop.
 type Runner struct {
-	path    string
-	delay   time.Duration
-	timeout time.Duration
+	path     string
+	delay    time.Duration
+	timeout  time.Duration
+	debugLog *os.File // nil = debug logging off
 }
 
 // Run executes the loop, sending state transitions to states.
@@ -101,7 +105,20 @@ func (r *Runner) runOnce(ctx context.Context) (bool, int64, *exec.ExitError) {
 		"--output-format", "json",
 	)
 	c.Dir = r.path
-	out, err := c.Output()
+
+	var stdoutBuf bytes.Buffer
+	if r.debugLog != nil {
+		fmt.Fprintf(r.debugLog, "--- %s ---\n", time.Now().Format(time.RFC3339))
+		c.Stdout = io.MultiWriter(&stdoutBuf, r.debugLog)
+		c.Stderr = r.debugLog
+	} else {
+		c.Stdout = &stdoutBuf
+	}
+	err := c.Run()
+
+	if r.debugLog != nil {
+		fmt.Fprintln(r.debugLog)
+	}
 
 	if ctx.Err() != nil {
 		return false, 0, nil
@@ -110,7 +127,7 @@ func (r *Runner) runOnce(ctx context.Context) (bool, int64, *exec.ExitError) {
 		return true, 0, nil
 	}
 
-	tokens := parseTokens(out)
+	tokens := parseTokens(stdoutBuf.Bytes())
 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
