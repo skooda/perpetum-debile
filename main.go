@@ -17,16 +17,23 @@ import (
 )
 
 func main() {
-	pathFlag := flag.String("path", "", "project directory to run claude in (required)")
 	delayFlag := flag.Duration("delay", 5*time.Second, "pause between end of run and next start")
-	timeoutFlag := flag.Duration("timeout", 10*time.Minute, "max duration per command run")
+	timeoutFlag := flag.Duration("timeout", 10*time.Minute, "max duration per Claude Code run")
 	flag.Parse()
 
-	if *pathFlag == "" {
-		fmt.Fprintln(os.Stderr, "error: --path is required")
-		flag.Usage()
+	args := flag.Args()
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "error: path argument is required")
+		fmt.Fprintln(os.Stderr, "usage: perpetum-debile <path> [--delay 5s] [--timeout 10m]")
 		os.Exit(1)
 	}
+	targetPath := args[0]
+	info, err := os.Stat(targetPath)
+	if err != nil || !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "error: %q is not a valid directory\n", targetPath)
+		os.Exit(1)
+	}
+
 	if *timeoutFlag <= *delayFlag {
 		fmt.Fprintln(os.Stderr, "warning: --timeout should be greater than --delay")
 	}
@@ -39,7 +46,7 @@ func main() {
 		systray.SetIcon(checkPNG)
 		mQuit := systray.AddMenuItem("Quit", "Quit Perpetum Debile")
 
-		runner := &Runner{path: *pathFlag, delay: *delayFlag, timeout: *timeoutFlag}
+		runner := &Runner{path: targetPath, delay: *delayFlag, timeout: *timeoutFlag}
 		states := make(chan State)
 
 		go runner.Run(ctx, states)
