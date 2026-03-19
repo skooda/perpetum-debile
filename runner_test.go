@@ -63,11 +63,11 @@ func TestRunnerSuccess(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("expected at least 2 states, got %d: %v", len(got), got)
 	}
-	if got[0] != StateRunning {
-		t.Errorf("state[0]: want StateRunning, got %v", got[0])
+	if got[0].Kind != StateRunning {
+		t.Errorf("state[0].Kind: want StateRunning, got %v", got[0].Kind)
 	}
-	if got[1] != StateSuccess {
-		t.Errorf("state[1]: want StateSuccess, got %v", got[1])
+	if got[1].Kind != StateSuccess {
+		t.Errorf("state[1].Kind: want StateSuccess, got %v", got[1].Kind)
 	}
 }
 
@@ -93,11 +93,11 @@ func TestRunnerFailure(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("expected at least 2 states, got %d: %v", len(got), got)
 	}
-	if got[0] != StateRunning {
-		t.Errorf("state[0]: want StateRunning, got %v", got[0])
+	if got[0].Kind != StateRunning {
+		t.Errorf("state[0].Kind: want StateRunning, got %v", got[0].Kind)
 	}
-	if got[1] != StateFailed {
-		t.Errorf("state[1]: want StateFailed, got %v", got[1])
+	if got[1].Kind != StateFailed {
+		t.Errorf("state[1].Kind: want StateFailed, got %v", got[1].Kind)
 	}
 }
 
@@ -114,7 +114,12 @@ func TestRunnerConsecutiveTimeouts(t *testing.T) {
 
 	got := collectStates(states)
 
-	want := []State{StateRunning, StateRunning, StateRunning, StateFailed}
+	want := []State{
+		{Kind: StateRunning},
+		{Kind: StateRunning},
+		{Kind: StateRunning},
+		{Kind: StateFailed},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("want %v, got %v", want, got)
 	}
@@ -142,10 +147,10 @@ func TestRunnerMissingTargetMD(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("expected at least 2 states, got %d: %v", len(got), got)
 	}
-	if got[0] != StateRunning {
-		t.Errorf("state[0]: want StateRunning, got %v", got[0])
+	if got[0].Kind != StateRunning {
+		t.Errorf("state[0].Kind: want StateRunning, got %v", got[0].Kind)
 	}
-	if got[1] != StateFailed {
-		t.Errorf("state[1]: want StateFailed, got %v", got[1])
+	if got[1].Kind != StateFailed {
+		t.Errorf("state[1].Kind: want StateFailed, got %v", got[1].Kind)
 	}
 }

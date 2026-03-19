@@ -24,10 +24,11 @@ type Runner struct {
 func (r *Runner) Run(ctx context.Context, states chan<- State) {
 	defer close(states)
 	consecutiveTimeouts := 0
+	totalTokens := int64(0)
 
 	for {
 		select {
-		case states <- StateRunning:
+		case states <- State{Kind: StateRunning, Total: totalTokens}:
 		case <-ctx.Done():
 			return
 		}
@@ -35,7 +36,7 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 		// Check target.md exists before running
 		if _, err := os.Stat(filepath.Join(r.path, "target.md")); os.IsNotExist(err) {
 			select {
-			case states <- StateFailed:
+			case states <- State{Kind: StateFailed, Total: totalTokens}:
 			case <-ctx.Done():
 				return
 			}
@@ -56,7 +57,7 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 			consecutiveTimeouts++
 			if consecutiveTimeouts >= maxConsecutiveTimeouts {
 				select {
-				case states <- StateFailed:
+				case states <- State{Kind: StateFailed, Total: totalTokens}:
 				case <-ctx.Done():
 				}
 				return
@@ -64,14 +65,14 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 			// non-fatal timeout: wait delay and retry (no state sent)
 		} else {
 			consecutiveTimeouts = 0
-			var nextState State
+			var kind StateKind
 			if exitErr != nil {
-				nextState = StateFailed
+				kind = StateFailed
 			} else {
-				nextState = StateSuccess
+				kind = StateSuccess
 			}
 			select {
-			case states <- nextState:
+			case states <- State{Kind: kind, Total: totalTokens}:
 			case <-ctx.Done():
 				return
 			}

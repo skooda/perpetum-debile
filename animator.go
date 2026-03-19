@@ -23,7 +23,7 @@ func (a *Animator) Run(ctx context.Context) {
 	ticker := time.NewTicker(150 * time.Millisecond)
 	defer ticker.Stop()
 
-	current := StateSuccess
+	current := State{Kind: StateSuccess}
 	frameIdx := 0
 
 	for {
@@ -35,18 +35,18 @@ func (a *Animator) Run(ctx context.Context) {
 				return
 			}
 			current = state
-			if state == StateRunning {
+			if state.Kind == StateRunning {
 				frameIdx = 0
 			}
 		case <-ticker.C:
-			switch current {
+			switch current.Kind {
 			case StateRunning:
-				systray.SetTemplateIcon(flameFrames[frameIdx], flameFrames[frameIdx])
+				systray.SetIcon(flameFrames[frameIdx])
 				frameIdx = (frameIdx + 1) % len(flameFrames)
 			case StateSuccess:
-				systray.SetTemplateIcon(checkPNG, checkPNG)
+				systray.SetIcon(checkPNG)
 			case StateFailed:
-				systray.SetTemplateIcon(bangPNG, bangPNG)
+				systray.SetIcon(bangPNG)
 			}
 		}
 	}
