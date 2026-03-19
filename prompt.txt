@@ -1,0 +1,1 @@
+Look at current directory, read target.md, decide what is the best thing to do next in order to move project towards target described in target.md, do it and add one line standup about what you did into standup.log

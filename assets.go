@@ -20,4 +20,7 @@ var checkPNG []byte
 //go:embed assets/bang.png
 var bangPNG []byte
 
+//go:embed prompt.txt
+var embeddedPrompt string
+
 var flameFrames = [][]byte{flame1PNG, flame2PNG, flame3PNG, flame4PNG}
