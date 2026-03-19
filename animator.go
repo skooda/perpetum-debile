@@ -3,12 +3,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/getlantern/systray"
 )
 
-// Animator reads states and updates the systray icon accordingly.
+// Animator reads states and updates the systray icon and title accordingly.
 type Animator struct {
 	states <-chan State
 }
@@ -25,6 +26,7 @@ func (a *Animator) Run(ctx context.Context) {
 
 	current := State{Kind: StateSuccess}
 	frameIdx := 0
+	hasReceivedState := false
 
 	for {
 		select {
@@ -34,6 +36,7 @@ func (a *Animator) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
+			hasReceivedState = true
 			current = state
 			if state.Kind == StateRunning {
 				frameIdx = 0
@@ -48,6 +51,31 @@ func (a *Animator) Run(ctx context.Context) {
 			case StateFailed:
 				systray.SetIcon(bangPNG)
 			}
+			if hasReceivedState {
+				systray.SetTitle(tokenLabel(current))
+			}
 		}
 	}
+}
+
+// tokenLabel returns the menu bar text for the given state.
+func tokenLabel(s State) string {
+	total := formatTokens(s.Total)
+	if s.Kind == StateRunning {
+		return "… / " + total
+	}
+	return formatTokens(s.RunTokens) + " / " + total
+}
+
+// formatTokens formats a token count for display.
+// Values under 1000 are shown as-is; 1000+ as "1.2k" with trailing ".0" omitted.
+func formatTokens(n int64) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	s := fmt.Sprintf("%.1f", float64(n)/1000.0)
+	if len(s) > 2 && s[len(s)-2:] == ".0" {
+		s = s[:len(s)-2]
+	}
+	return s + "k"
 }
