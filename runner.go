@@ -4,20 +4,22 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
 const maxConsecutiveTimeouts = 3
 
-// Runner executes a shell command sequentially in a loop.
+// Runner runs claude in a target directory sequentially in a loop.
 type Runner struct {
-	cmd     string
+	path    string
 	delay   time.Duration
 	timeout time.Duration
 }
 
-// Run executes the command loop, sending state transitions to states.
+// Run executes the loop, sending state transitions to states.
 // Closes states when done (permanent failure or context cancelled).
 func (r *Runner) Run(ctx context.Context, states chan<- State) {
 	defer close(states)
@@ -28,6 +30,21 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 		case states <- StateRunning:
 		case <-ctx.Done():
 			return
+		}
+
+		// Check target.md exists before running
+		if _, err := os.Stat(filepath.Join(r.path, "target.md")); os.IsNotExist(err) {
+			select {
+			case states <- StateFailed:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(r.delay):
+			}
+			continue
 		}
 
 		timedOut, exitErr := r.runOnce(ctx)
@@ -44,7 +61,7 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 				}
 				return
 			}
-			// non-fatal timeout: just wait delay and retry (no state sent)
+			// non-fatal timeout: wait delay and retry (no state sent)
 		} else {
 			consecutiveTimeouts = 0
 			var nextState State
@@ -68,12 +85,18 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 	}
 }
 
-// runOnce runs the command once. Returns (timedOut, exitError).
+// runOnce runs claude once in r.path. Returns (timedOut, exitError).
 func (r *Runner) runOnce(ctx context.Context) (bool, *exec.ExitError) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
-	c := exec.CommandContext(timeoutCtx, "sh", "-c", r.cmd)
+	c := exec.CommandContext(timeoutCtx, "claude",
+		"-p", embeddedPrompt,
+		"--model", "haiku",
+		"--allowedTools", "WebSearch,Edit",
+		"--setting-sources", "project,local",
+	)
+	c.Dir = r.path
 	err := c.Run()
 
 	if ctx.Err() != nil {

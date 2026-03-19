@@ -17,13 +17,13 @@ import (
 )
 
 func main() {
-	cmdFlag := flag.String("cmd", "", "shell command to run (required)")
+	pathFlag := flag.String("path", "", "project directory to run claude in (required)")
 	delayFlag := flag.Duration("delay", 5*time.Second, "pause between end of run and next start")
 	timeoutFlag := flag.Duration("timeout", 10*time.Minute, "max duration per command run")
 	flag.Parse()
 
-	if *cmdFlag == "" {
-		fmt.Fprintln(os.Stderr, "error: --cmd is required")
+	if *pathFlag == "" {
+		fmt.Fprintln(os.Stderr, "error: --path is required")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -36,10 +36,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	systray.Run(func() {
-		systray.SetTemplateIcon(checkPNG, checkPNG)
+		systray.SetIcon(checkPNG)
 		mQuit := systray.AddMenuItem("Quit", "Quit Perpetum Debile")
 
-		runner := &Runner{cmd: *cmdFlag, delay: *delayFlag, timeout: *timeoutFlag}
+		runner := &Runner{path: *pathFlag, delay: *delayFlag, timeout: *timeoutFlag}
 		states := make(chan State)
 
 		go runner.Run(ctx, states)
