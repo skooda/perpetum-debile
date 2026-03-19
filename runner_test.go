@@ -41,8 +41,14 @@ func setupTestEnv(t *testing.T, claudeScript string, withTargetMD bool) (project
 	return projectDir, func() { os.Setenv("PATH", origPath) }
 }
 
+// successJSON emits 1000 tokens total (100+200+300+400) and exits 0.
+const successJSON = `echo '{"usage":{"input_tokens":100,"cache_creation_input_tokens":200,"cache_read_input_tokens":300,"output_tokens":400}}' && exit 0`
+
+// failureJSON emits 100 tokens total (50+50) and exits 1.
+const failureJSON = `echo '{"usage":{"input_tokens":50,"output_tokens":50}}' && exit 1`
+
 func TestRunnerSuccess(t *testing.T) {
-	projectDir, cleanup := setupTestEnv(t, "exit 0", true)
+	projectDir, cleanup := setupTestEnv(t, successJSON, true)
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -69,10 +75,16 @@ func TestRunnerSuccess(t *testing.T) {
 	if got[1].Kind != StateSuccess {
 		t.Errorf("state[1].Kind: want StateSuccess, got %v", got[1].Kind)
 	}
+	if got[1].RunTokens != 1000 {
+		t.Errorf("state[1].RunTokens: want 1000, got %d", got[1].RunTokens)
+	}
+	if got[1].Total != 1000 {
+		t.Errorf("state[1].Total: want 1000, got %d", got[1].Total)
+	}
 }
 
 func TestRunnerFailure(t *testing.T) {
-	projectDir, cleanup := setupTestEnv(t, "exit 1", true)
+	projectDir, cleanup := setupTestEnv(t, failureJSON, true)
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -98,6 +110,12 @@ func TestRunnerFailure(t *testing.T) {
 	}
 	if got[1].Kind != StateFailed {
 		t.Errorf("state[1].Kind: want StateFailed, got %v", got[1].Kind)
+	}
+	if got[1].RunTokens != 100 {
+		t.Errorf("state[1].RunTokens: want 100, got %d", got[1].RunTokens)
+	}
+	if got[1].Total != 100 {
+		t.Errorf("state[1].Total: want 100, got %d", got[1].Total)
 	}
 }
 
@@ -126,7 +144,7 @@ func TestRunnerConsecutiveTimeouts(t *testing.T) {
 }
 
 func TestRunnerMissingTargetMD(t *testing.T) {
-	projectDir, cleanup := setupTestEnv(t, "exit 0", false) // no target.md
+	projectDir, cleanup := setupTestEnv(t, successJSON, false) // no target.md
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -152,5 +170,9 @@ func TestRunnerMissingTargetMD(t *testing.T) {
 	}
 	if got[1].Kind != StateFailed {
 		t.Errorf("state[1].Kind: want StateFailed, got %v", got[1].Kind)
+	}
+	// No tokens consumed when target.md is missing
+	if got[1].RunTokens != 0 {
+		t.Errorf("state[1].RunTokens: want 0, got %d", got[1].RunTokens)
 	}
 }

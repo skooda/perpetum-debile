@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -48,7 +49,7 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 			continue
 		}
 
-		timedOut, exitErr := r.runOnce(ctx)
+		timedOut, runTokens, exitErr := r.runOnce(ctx)
 		if ctx.Err() != nil {
 			return
 		}
@@ -65,6 +66,7 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 			// non-fatal timeout: wait delay and retry (no state sent)
 		} else {
 			consecutiveTimeouts = 0
+			totalTokens += runTokens
 			var kind StateKind
 			if exitErr != nil {
 				kind = StateFailed
@@ -72,7 +74,7 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 				kind = StateSuccess
 			}
 			select {
-			case states <- State{Kind: kind, Total: totalTokens}:
+			case states <- State{Kind: kind, RunTokens: runTokens, Total: totalTokens}:
 			case <-ctx.Done():
 				return
 			}
@@ -86,8 +88,8 @@ func (r *Runner) Run(ctx context.Context, states chan<- State) {
 	}
 }
 
-// runOnce runs claude once in r.path. Returns (timedOut, exitError).
-func (r *Runner) runOnce(ctx context.Context) (bool, *exec.ExitError) {
+// runOnce runs claude once in r.path. Returns (timedOut, tokens, exitError).
+func (r *Runner) runOnce(ctx context.Context) (bool, int64, *exec.ExitError) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
@@ -96,20 +98,44 @@ func (r *Runner) runOnce(ctx context.Context) (bool, *exec.ExitError) {
 		"--model", "haiku",
 		"--allowedTools", "WebSearch,Edit",
 		"--setting-sources", "project,local",
+		"--output-format", "json",
 	)
 	c.Dir = r.path
-	err := c.Run()
+	out, err := c.Output()
 
 	if ctx.Err() != nil {
-		return false, nil
+		return false, 0, nil
 	}
 	if timeoutCtx.Err() == context.DeadlineExceeded {
-		return true, nil
+		return true, 0, nil
 	}
+
+	tokens := parseTokens(out)
 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return false, exitErr
+		return false, tokens, exitErr
 	}
-	return false, nil
+	return false, tokens, nil
+}
+
+// parseTokens extracts the total token count from claude --output-format json stdout.
+// Sums all four fields: input, cache_creation_input, cache_read_input, output.
+// Returns 0 on parse failure (best-effort; run result is unaffected).
+func parseTokens(data []byte) int64 {
+	var out struct {
+		Usage struct {
+			InputTokens              int64 `json:"input_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+			OutputTokens             int64 `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return 0
+	}
+	return out.Usage.InputTokens +
+		out.Usage.CacheCreationInputTokens +
+		out.Usage.CacheReadInputTokens +
+		out.Usage.OutputTokens
 }
